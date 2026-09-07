@@ -1,0 +1,53 @@
+name: NyaySaathi Daily Judgment Scrape
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  daily-scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip check
+
+      - name: Verify application startup
+        run: |
+          python -c "import download; print('download import: OK')"
+          python -c "import judgment_processor; print('judgment_processor import: OK')"
+
+      - name: Run known-good test
+        run: |
+          python run.py \
+            --court_codes "2~5" \
+            --start_date "2026-08-27" \
+            --end_date "2026-08-27" \
+            --max_workers 2 \
+            --no-default-dist-codes \
+            --no-compress-pdfs
+
+      - name: Report completion
+        if: always()
+        run: |
+          echo "GitHub known-good test finished."
