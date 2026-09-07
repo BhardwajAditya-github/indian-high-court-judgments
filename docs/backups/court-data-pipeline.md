@@ -1,41 +1,35 @@
 name: Court Data Pipeline
 
 on:
-  schedule:
-    # Run at 2:00 AM UTC every day
-    - cron: "0 2 * * *"
-  workflow_dispatch:
-    inputs:
-      court_code:
-        description: "Court code to process (e.g. 33_10). Leave empty for all courts."
-        required: false
-        default: ""
-      start_date:
-        description: "Start date (YYYY-MM-DD). Leave empty to auto-detect from S3."
-        required: false
-        default: ""
-      end_date:
-        description: "End date (YYYY-MM-DD). Leave empty for today."
-        required: false
-        default: ""
+schedule: # Run at 2:00 AM UTC every day - cron: "0 2 \* \* \*"
+workflow_dispatch:
+inputs:
+court_code:
+description: "Court code to process (e.g. 33_10). Leave empty for all courts."
+required: false
+default: ""
+start_date:
+description: "Start date (YYYY-MM-DD). Leave empty to auto-detect from S3."
+required: false
+default: ""
+end_date:
+description: "End date (YYYY-MM-DD). Leave empty for today."
+required: false
+default: ""
 env:
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
 concurrency:
-  group: court-data-pipeline
-  cancel-in-progress: false
+group: court-data-pipeline
+cancel-in-progress: false
 
 jobs:
-  run-data-pipeline:
-    runs-on: ubuntu-latest
-    # Without this the job inherits GitHub's hard 6h cap, and a cap kill is
-    # reported as "cancelled" — which reads like someone stopped the run rather
-    # than a broken sync. Stay under the cap so the pipeline's own budget
-    # (--max-runtime-minutes) stops it first and it exits non-zero instead.
-    timeout-minutes: 350
-    permissions:
-      contents: write
-      id-token: write
+run-data-pipeline:
+runs-on: ubuntu-latest # Without this the job inherits GitHub's hard 6h cap, and a cap kill is # reported as "cancelled" — which reads like someone stopped the run rather # than a broken sync. Stay under the cap so the pipeline's own budget # (--max-runtime-minutes) stops it first and it exits non-zero instead.
+timeout-minutes: 350
+permissions:
+contents: write
+id-token: write
 
     steps:
       - name: Checkout repository
