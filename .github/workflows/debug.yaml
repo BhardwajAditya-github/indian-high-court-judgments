@@ -41,8 +41,8 @@ jobs:
         run: |
           python run.py \
             --court_codes "2~5" \
-            --start_date "2026-09-07" \
-            --end_date "2026-09-07" \
+            --start_date "2026-09-06" \
+            --end_date "2026-09-06" \
             --max_workers 2 \
             --no-default-dist-codes \
             --no-compress-pdfs
