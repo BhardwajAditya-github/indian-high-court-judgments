@@ -1489,6 +1489,12 @@ class Downloader:
         present). A JSON-present-only case is rare and handled by the batch
         upload path which dedupes against the metadata index.
         """
+
+        # S3 is disabled in the current production pipeline.
+        # Do not touch AWS/cache_store when S3_ENABLED is False.
+        if not S3_ENABLED:
+            return False, False
+
         pdf_path_obj = Path(pdf_path) if isinstance(pdf_path, str) else pdf_path
         # get_pdf_output_path expects a string (calls .split("#"))
         pdf_path_str = str(pdf_path) if not isinstance(pdf_path, str) else pdf_path
