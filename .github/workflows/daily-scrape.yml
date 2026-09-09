@@ -2,8 +2,8 @@ name: NyaySaathi Daily Judgment Scrape
 
 on:
   schedule:
-    # 4:00 PM IST = 10:30 AM UTC
-    - cron: "30 10 * * *"
+    # 5:00 AM IST = 11:30 PM UTC (previous day)
+    - cron: "30 23 * * *"
   workflow_dispatch:
 
 permissions:
@@ -34,19 +34,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Calculate today's date (IST)
+      - name: Calculate yesterday's date (IST)
         id: date
         run: |
-          TODAY=$(TZ=Asia/Kolkata date +%Y-%m-%d)
-          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
-          echo "Scraping date: $TODAY (IST)"
+          YESTERDAY=$(TZ=Asia/Kolkata date -d "yesterday" +%Y-%m-%d)
+
+          echo "yesterday=$YESTERDAY" >> "$GITHUB_OUTPUT"
+
+          echo "Scraping date: $YESTERDAY (IST)"
+          echo "Current date: $(TZ=Asia/Kolkata date +%Y-%m-%d) (IST)"
 
       - name: Run daily NyaySaathi pipeline
         run: |
           python run.py \
             --court_codes "9~13,27~1,19~16,18~6,36~29,28~2,22~18,7~26,24~17,2~5,1~12,20~7,29~3,32~4,23~23,14~25,17~21,21~11,3~22,8~9,11~24,16~20,5~15,33~10,10~8" \
-            --start_date "${{ steps.date.outputs.today }}" \
-            --end_date "${{ steps.date.outputs.today }}" \
+            --start_date "${{ steps.date.outputs.yesterday }}" \
+            --end_date "${{ steps.date.outputs.yesterday }}" \
             --max_workers 2 \
             --no-default-dist-codes \
             --no-compress-pdfs
@@ -55,4 +58,4 @@ jobs:
         if: always()
         run: |
           echo "Daily NyaySaathi scrape workflow finished."
-          echo "Scrape date: ${{ steps.date.outputs.today }}"
+          echo "Scrape date: ${{ steps.date.outputs.yesterday }} (IST)"
