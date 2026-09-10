@@ -20,20 +20,66 @@ jobs:
       TZ: Asia/Kolkata
 
     steps:
+      # --------------------------------------------------
+      # 1. Checkout
+      # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # 2. Python
+      # --------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
+      # --------------------------------------------------
+      # 3. Dependencies
+      # --------------------------------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip check
 
+      # --------------------------------------------------
+      # 4. Verify application startup
+      # --------------------------------------------------
+      - name: Verify application startup
+        run: |
+          python -c "import download; print('download import: OK')"
+          python -c "import judgment_processor; print('judgment_processor import: OK')"
+          python -c "import run; print('run import: OK')"
+
+      # --------------------------------------------------
+      # 5. Verify environment
+      # --------------------------------------------------
+      - name: Verify environment
+        run: |
+          python - <<'PY'
+          import os
+
+          required = [
+              "SUPABASE_URL",
+              "SUPABASE_SERVICE_ROLE_KEY",
+          ]
+
+          for name in required:
+              value = os.getenv(name)
+
+              if not value:
+                  raise RuntimeError(f"{name} is missing")
+
+              print(f"{name}: present")
+
+          print("Environment check: OK")
+          PY
+
+      # --------------------------------------------------
+      # 6. Calculate yesterday's date (IST)
+      # --------------------------------------------------
       - name: Calculate yesterday's date (IST)
         id: date
         run: |
@@ -41,9 +87,32 @@ jobs:
 
           echo "yesterday=$YESTERDAY" >> "$GITHUB_OUTPUT"
 
+          echo "=========================================="
+          echo "NyaySaathi Daily Scrape"
+          echo "=========================================="
           echo "Scraping date: $YESTERDAY (IST)"
-          echo "Current date: $(TZ=Asia/Kolkata date +%Y-%m-%d) (IST)"
+          echo "Current date:  $(TZ=Asia/Kolkata date +%Y-%m-%d) (IST)"
+          echo "Current time:  $(TZ=Asia/Kolkata date +%H:%M:%S) (IST)"
+          echo "=========================================="
 
+      # --------------------------------------------------
+      # 7. Run daily NyaySaathi pipeline
+      #
+      # IMPORTANT:
+      # run.py now handles the complete lifecycle:
+      #
+      #   SCRAPER
+      #      ↓
+      #   wait for scraper to EXIT
+      #      ↓
+      #   PROCESSOR
+      #      ↓
+      #   drain orders/
+      #      ↓
+      #   stop processor
+      #
+      # The processor is NOT started concurrently.
+      # --------------------------------------------------
       - name: Run daily NyaySaathi pipeline
         run: |
           python run.py \
@@ -54,8 +123,16 @@ jobs:
             --no-default-dist-codes \
             --no-compress-pdfs
 
+      # --------------------------------------------------
+      # 8. Report completion
+      # --------------------------------------------------
       - name: Report completion
         if: always()
         run: |
-          echo "Daily NyaySaathi scrape workflow finished."
+          echo "=========================================="
+          echo "NyaySaathi Daily Scrape Workflow Finished"
+          echo "=========================================="
           echo "Scrape date: ${{ steps.date.outputs.yesterday }} (IST)"
+          echo "Courts:       25"
+          echo "Workers:      2"
+          echo "=========================================="
