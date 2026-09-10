@@ -48,9 +48,10 @@ jobs:
         run: |
           python -c "import download; print('download import: OK')"
           python -c "import judgment_processor; print('judgment_processor import: OK')"
+          python -c "import run; print('run import: OK')"
 
       # --------------------------------------------------
-      # 5. Verify Supabase environment variables exist
+      # 5. Verify Supabase environment variables
       # --------------------------------------------------
       - name: Verify environment
         run: |
@@ -74,23 +75,23 @@ jobs:
           PY
 
       # --------------------------------------------------
-      # 6. Run controlled multi-court test
+      # 6. Run controlled six-court test
       #
       # IMPORTANT:
-      # Use the previously known-good date.
+      # 2026-09-08 = Tuesday
+      # - not today
+      # - not Sunday
+      # - chosen as a normal working day
       #
-      # 2~5 = one court
-      # 9~13 = second court
-      #
-      # This lets us determine whether comma-separated
-      # multiple courts cause the session problem.
+      # Replace the four TODO codes below with the
+      # additional known-valid court codes.
       # --------------------------------------------------
-      - name: Run two-court test
+      - name: Run six-court test
         run: |
           python run.py \
-            --court_codes "2~5,9~13" \
-            --start_date "2026-09-02" \
-            --end_date "2026-09-02" \
+            --court_codes "2~5,9~13,COURT_3,COURT_4,COURT_5,COURT_6" \
+            --start_date "2026-09-08" \
+            --end_date "2026-09-08" \
             --max_workers 2 \
             --no-default-dist-codes \
             --no-compress-pdfs
@@ -102,8 +103,9 @@ jobs:
         if: always()
         run: |
           echo "=========================================="
-          echo "NyaySaathi multi-court test finished"
+          echo "NyaySaathi six-court test finished"
           echo "=========================================="
-          echo "Courts tested: 2~5,9~13"
-          echo "Date tested:   2026-09-02"
+          echo "Courts tested: 2~5,9~13,COURT_3,COURT_4,COURT_5,COURT_6"
+          echo "Date tested:   2026-09-08"
+          echo "Workers:       2"
           echo "=========================================="
