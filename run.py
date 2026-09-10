@@ -375,6 +375,68 @@ signal.signal(signal.SIGINT, handle_shutdown)
 signal.signal(signal.SIGTERM, handle_shutdown)
 
 
+def diagnose_orders_directory(label):
+    """
+    Diagnostic snapshot of orders/ contents.
+    Does not modify anything.
+    """
+
+    logger.info("=" * 70)
+    logger.info(f"ORDERS DIRECTORY DIAGNOSTIC — {label}")
+    logger.info("=" * 70)
+
+    logger.info(f"Orders directory: {ORDERS_DIR}")
+    logger.info(f"Directory exists: {ORDERS_DIR.exists()}")
+
+    if not ORDERS_DIR.exists():
+        logger.error("CRITICAL: orders/ directory does not exist!")
+        return
+
+    try:
+        all_files = [f for f in ORDERS_DIR.iterdir() if f.is_file()]
+
+        pdf_files = [f for f in all_files if f.suffix.lower() == ".pdf"]
+
+        json_files = [f for f in all_files if f.suffix.lower() == ".json"]
+
+        other_files = [
+            f for f in all_files if f.suffix.lower() not in {".pdf", ".json"}
+        ]
+
+        logger.info(f"Total files: {len(all_files)}")
+        logger.info(f"PDF files: {len(pdf_files)}")
+        logger.info(f"JSON files: {len(json_files)}")
+        logger.info(f"Other files: {len(other_files)}")
+
+        if not all_files:
+            logger.error("!!! ORDERS DIRECTORY IS EMPTY !!!")
+            logger.error(
+                "No PDF/JSON queue files are present after scraper completion."
+            )
+
+        else:
+            logger.info("Queue files currently present:")
+
+            for file in sorted(all_files)[:20]:
+                try:
+                    stat = file.stat()
+                    logger.info(
+                        f"  {file.name} | "
+                        f"size={stat.st_size} bytes | "
+                        f"mtime={stat.st_mtime}"
+                    )
+                except Exception:
+                    logger.exception(f"Could not stat queue file: {file}")
+
+            if len(all_files) > 20:
+                logger.info(f"... and {len(all_files) - 20} more file(s)")
+
+    except Exception:
+        logger.exception("Failed to inspect orders/ directory.")
+
+    logger.info("=" * 70)
+
+
 # ============================================================
 # ARGUMENTS
 # ============================================================
@@ -533,6 +595,8 @@ def main():
         logger.info(f"Scraper exited with code {scraper_exit_code}")
         logger.info("=" * 70)
 
+        diagnose_orders_directory("IMMEDIATELY AFTER SCRAPER FINISHED")
+
         # ----------------------------------------------------
         # If scraper failed, we still drain whatever it managed
         # to download before exiting.
@@ -550,6 +614,8 @@ def main():
         # ----------------------------------------------------
 
         wait_for_queue_to_drain()
+
+        diagnose_orders_directory("AFTER PROCESSOR DRAIN")
 
         # ----------------------------------------------------
         # 5. Stop processor.
