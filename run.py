@@ -21,9 +21,6 @@ ORDERS_DIR = BASE_DIR / "data" / "court" / "cnrorders" / "cmis" / "orders"
 # Temporary directory containing solved captcha files.
 CAPTCHA_TMP_DIR = BASE_DIR / "captcha-tmp"
 
-# Give the processor a little time to start watching orders/
-PROCESSOR_STARTUP_WAIT_SECONDS = 3
-
 # How often we check whether the queue is empty
 QUEUE_CHECK_INTERVAL_SECONDS = 5
 
@@ -82,43 +79,68 @@ def queue_is_empty():
 
 def wait_for_queue_to_drain():
     """
-    Wait until orders/ remains empty for several consecutive checks.
+    Wait until judgment_processor.py has drained the queue.
 
-    This prevents us from shutting down the processor immediately
-    when the queue happens to be empty between scraper writes.
+    IMPORTANT:
+    The scraper has already completely exited before this function is called.
+    Therefore, no process is adding files to orders/ while we are draining it.
     """
 
     logger.info("=" * 70)
-    logger.info("Scraper finished.")
-    logger.info("Waiting for judgment processor to drain orders/...")
+    logger.info("SCRAPER COMPLETELY FINISHED.")
+    logger.info("Starting processor drain phase...")
     logger.info("=" * 70)
 
     consecutive_empty_checks = 0
 
     while True:
+        if processor_process is None:
+            raise RuntimeError(
+                "Processor process reference is missing while draining queue."
+            )
+
+        processor_exit_code = processor_process.poll()
         queue_files = get_queue_files()
+
+        if processor_exit_code is not None:
+            if queue_files:
+                raise RuntimeError(
+                    "Judgment processor exited before the queue was drained. "
+                    f"exit_code={processor_exit_code}, "
+                    f"remaining_files={len(queue_files)}"
+                )
+
+            if processor_exit_code != 0:
+                raise RuntimeError(
+                    "Judgment processor exited with an error while the queue "
+                    f"was empty. exit_code={processor_exit_code}"
+                )
+
+            logger.info("Judgment processor exited cleanly and orders/ is empty.")
+            return True
 
         if not queue_files:
             consecutive_empty_checks += 1
 
             logger.info(
                 "orders/ is empty "
-                f"({consecutive_empty_checks}/"
-                f"{QUEUE_EMPTY_CONFIRMATIONS} confirmations)"
+                f"({consecutive_empty_checks}/{QUEUE_EMPTY_CONFIRMATIONS})"
             )
 
             if consecutive_empty_checks >= QUEUE_EMPTY_CONFIRMATIONS:
-                logger.info("Queue successfully drained.")
+                logger.info(
+                    "Queue successfully drained. "
+                    "Processor remained alive during confirmation period."
+                )
                 return True
-
         else:
             consecutive_empty_checks = 0
 
-            pdf_count = len([f for f in queue_files if f.suffix.lower() == ".pdf"])
-            json_count = len([f for f in queue_files if f.suffix.lower() == ".json"])
+            pdf_count = sum(1 for f in queue_files if f.suffix.lower() == ".pdf")
+            json_count = sum(1 for f in queue_files if f.suffix.lower() == ".json")
 
             logger.info(
-                f"Queue still has {pdf_count} PDF(s) + " f"{json_count} JSON file(s)."
+                f"Queue pending: {pdf_count} PDF(s) + " f"{json_count} JSON file(s)."
             )
 
         time.sleep(QUEUE_CHECK_INTERVAL_SECONDS)
@@ -171,14 +193,17 @@ def cleanup_captcha_tmp():
 
 def start_processor():
     """
-    Start judgment_processor.py as a separate process.
+    Start judgment_processor.py.
+
+    This function is called ONLY after download.py has completely exited.
     """
 
     global processor_process
 
     logger.info("=" * 70)
-    logger.info("Starting judgment processor...")
+    logger.info("STARTING JUDGMENT PROCESSOR")
     logger.info(f"Script: {PROCESSOR_SCRIPT}")
+    logger.info(f"Orders directory: {ORDERS_DIR}")
     logger.info("=" * 70)
 
     processor_process = subprocess.Popen(
@@ -186,19 +211,18 @@ def start_processor():
         cwd=str(BASE_DIR),
     )
 
-    logger.info(f"Judgment processor started " f"(PID={processor_process.pid})")
-
     logger.info(
-        f"Waiting {PROCESSOR_STARTUP_WAIT_SECONDS}s " "for processor initialization..."
+        f"Judgment processor started successfully (PID={processor_process.pid})"
     )
 
-    time.sleep(PROCESSOR_STARTUP_WAIT_SECONDS)
+    # Give it one quick scheduling opportunity to catch immediate startup
+    # failures, without introducing a fixed multi-second startup dependency.
+    time.sleep(0.5)
 
-    # Make sure it didn't immediately crash.
     if processor_process.poll() is not None:
         raise RuntimeError(
-            "Judgment processor exited during startup "
-            f"with code {processor_process.returncode}"
+            "Judgment processor exited immediately after startup. "
+            f"exit_code={processor_process.returncode}"
         )
 
 
@@ -409,9 +433,10 @@ def diagnose_orders_directory(label):
         logger.info(f"Other files: {len(other_files)}")
 
         if not all_files:
-            logger.error("!!! ORDERS DIRECTORY IS EMPTY !!!")
-            logger.error(
-                "No PDF/JSON queue files are present after scraper completion."
+            logger.warning("orders/ is EMPTY.")
+            logger.warning(
+                "Because the processor has not started yet, this means the "
+                "scraper produced no PDF/JSON queue files."
             )
 
         else:
@@ -561,16 +586,46 @@ def main():
         exist_ok=True,
     )
 
+    # Never silently hide files left by a previous run.
+    # We do not delete them automatically.
+    existing_queue = get_queue_files()
+
+    if existing_queue:
+        existing_pdf_count = sum(
+            1 for f in existing_queue if f.suffix.lower() == ".pdf"
+        )
+        existing_json_count = sum(
+            1 for f in existing_queue if f.suffix.lower() == ".json"
+        )
+
+        logger.warning("=" * 70)
+        logger.warning("PRE-RUN QUEUE IS NOT EMPTY")
+        logger.warning(
+            f"Found {existing_pdf_count} PDF(s) + "
+            f"{existing_json_count} JSON file(s) before scraper start."
+        )
+        logger.warning(
+            "These files will remain in the queue and may be processed "
+            "together with the current run. They are NOT being deleted."
+        )
+        logger.warning("=" * 70)
+    else:
+        logger.info("Pre-run check: orders/ is empty.")
+
     try:
-        # ----------------------------------------------------
-        # 1. Start processor FIRST.
-        # ----------------------------------------------------
+        # ========================================================
+        # PHASE 1 — SCRAPER
+        # ========================================================
+        #
+        # The processor MUST NOT run during this phase.
+        # download.py gets exclusive ownership of the orders/ output.
+        # ========================================================
 
-        start_processor()
-
-        # ----------------------------------------------------
-        # 2. Start scraper.
-        # ----------------------------------------------------
+        logger.info("=" * 70)
+        logger.info("PHASE 1/2 — SCRAPER")
+        logger.info("Processor is NOT running.")
+        logger.info("Waiting for download.py to completely finish.")
+        logger.info("=" * 70)
 
         start_scraper(
             court_codes=args.court_codes,
@@ -585,65 +640,85 @@ def main():
             compress_pdfs=args.compress_pdfs,
         )
 
-        # ----------------------------------------------------
-        # 3. Wait for scraper.
-        # ----------------------------------------------------
+        logger.info("=" * 70)
+        logger.info("WAITING FOR SCRAPER PROCESS TO EXIT")
+        logger.info(f"Scraper PID: {scraper_process.pid}")
+        logger.info("=" * 70)
 
         scraper_exit_code = scraper_process.wait()
 
         logger.info("=" * 70)
-        logger.info(f"Scraper exited with code {scraper_exit_code}")
+        logger.info(f"SCRAPER PROCESS EXITED — exit_code={scraper_exit_code}")
         logger.info("=" * 70)
 
-        diagnose_orders_directory("IMMEDIATELY AFTER SCRAPER FINISHED")
-
-        # ----------------------------------------------------
-        # If scraper failed, we still drain whatever it managed
-        # to download before exiting.
-        # ----------------------------------------------------
-
+        # If scraper failed, DO NOT start the processor. This makes the
+        # scraper -> queue -> processor boundary explicit and deterministic.
         if scraper_exit_code != 0:
-            logger.error(
-                "Scraper failed. "
-                "Will still allow processor to finish "
-                "all judgments already downloaded."
-            )
+            logger.error("=" * 70)
+            logger.error("SCRAPER FAILED")
+            logger.error(f"download.py exited with code {scraper_exit_code}.")
+            logger.error("Judgment processor will NOT be started.")
+            logger.error("=" * 70)
 
-        # ----------------------------------------------------
-        # 4. Let processor drain the queue.
-        # ----------------------------------------------------
+            diagnose_orders_directory("AFTER SCRAPER FAILURE")
+
+            return scraper_exit_code
+
+        # At this point download.py's OS process has fully exited.
+        # No scraper process remains that can write to orders/.
+        diagnose_orders_directory("AFTER SCRAPER COMPLETELY FINISHED")
+
+        logger.info("=" * 70)
+        logger.info("SCRAPER PHASE COMPLETE")
+        logger.info(
+            "The scraper process has exited successfully. "
+            "No processor has touched orders/."
+        )
+        logger.info("=" * 70)
+
+        # ========================================================
+        # PHASE 2 — PROCESSOR
+        # ========================================================
+        #
+        # Processor starts ONLY after scraper process completion.
+        # ========================================================
+
+        start_processor()
 
         wait_for_queue_to_drain()
 
         diagnose_orders_directory("AFTER PROCESSOR DRAIN")
 
-        # ----------------------------------------------------
-        # 5. Stop processor.
-        # ----------------------------------------------------
+        # If files remain, never report success.
+        remaining_files = get_queue_files()
+        if remaining_files:
+            raise RuntimeError(
+                "Processor drain reported success but files remain in orders/: "
+                f"{len(remaining_files)} file(s)."
+            )
+
+        # ========================================================
+        # PHASE 3 — SHUTDOWN / CLEANUP
+        # ========================================================
 
         stop_processor()
 
-        # ----------------------------------------------------
-        # 6. Cleanup temporary captcha files.
-        # ----------------------------------------------------
+        processor_exit_code = (
+            processor_process.returncode if processor_process is not None else None
+        )
+
+        logger.info(f"Processor final exit code: {processor_exit_code}")
 
         cleanup_captcha_tmp()
 
-        # ----------------------------------------------------
-        # 7. Final status.
-        # ----------------------------------------------------
+        logger.info("=" * 70)
+        logger.info("PIPELINE SUCCESS")
+        logger.info("Scraper completed before processor started.")
+        logger.info("Processor drained the completed scraper output.")
+        logger.info("orders/ is empty.")
+        logger.info("=" * 70)
 
-        if scraper_exit_code == 0:
-            logger.info("=" * 70)
-            logger.info("PIPELINE SUCCESS")
-            logger.info("=" * 70)
-            return 0
-
-        logger.error("=" * 70)
-        logger.error("PIPELINE COMPLETED WITH SCRAPER ERRORS")
-        logger.error("=" * 70)
-
-        return scraper_exit_code
+        return 0
 
     except KeyboardInterrupt:
         logger.warning("Interrupted by user.")
