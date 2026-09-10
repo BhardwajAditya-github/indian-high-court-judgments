@@ -653,16 +653,19 @@ def main():
 
         # If scraper failed, DO NOT start the processor. This makes the
         # scraper -> queue -> processor boundary explicit and deterministic.
-        if scraper_exit_code != 0:
+        scraper_failed = scraper_exit_code != 0
+
+        if scraper_failed:
             logger.error("=" * 70)
             logger.error("SCRAPER FAILED")
             logger.error(f"download.py exited with code {scraper_exit_code}.")
-            logger.error("Judgment processor will NOT be started.")
+            logger.error("Checking orders/ for successfully downloaded files.")
+            logger.error(
+                "Processor will still be started to preserve partial progress."
+            )
             logger.error("=" * 70)
 
             diagnose_orders_directory("AFTER SCRAPER FAILURE")
-
-            return scraper_exit_code
 
         # At this point download.py's OS process has fully exited.
         # No scraper process remains that can write to orders/.
@@ -710,6 +713,15 @@ def main():
         logger.info(f"Processor final exit code: {processor_exit_code}")
 
         cleanup_captcha_tmp()
+
+        logger.info("=" * 70)
+        if scraper_failed:
+            logger.error("=" * 70)
+            logger.error("PIPELINE FAILED — SCRAPER FAILED")
+            logger.error("Processor drained all successfully downloaded files.")
+            logger.error("orders/ is empty.")
+            logger.error("=" * 70)
+            return scraper_exit_code
 
         logger.info("=" * 70)
         logger.info("PIPELINE SUCCESS")
