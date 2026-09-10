@@ -89,7 +89,7 @@ jobs:
       - name: Run six-court test
         run: |
           python run.py \
-            --court_codes "2~5,9~13,COURT_3,COURT_4,COURT_5,COURT_6" \
+            --court_codes "2~5,9~13,14~25,1~12" \
             --start_date "2026-09-08" \
             --end_date "2026-09-08" \
             --max_workers 2 \
@@ -105,7 +105,7 @@ jobs:
           echo "=========================================="
           echo "NyaySaathi six-court test finished"
           echo "=========================================="
-          echo "Courts tested: 2~5,9~13,COURT_3,COURT_4,COURT_5,COURT_6"
+          echo "Courts tested: 2~5,9~13,14~25,1~12"
           echo "Date tested:   2026-09-08"
           echo "Workers:       2"
           echo "=========================================="
